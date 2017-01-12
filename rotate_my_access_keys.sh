@@ -8,6 +8,8 @@
 # STS credentials.
 #
 
+key_id=$AWS_ACCESS_KEY_ID
+
 get_user_name() {
   aws sts get-caller-identity \
     --query Arn \
@@ -22,22 +24,35 @@ get_access_keys() {
 }
 
 create_new_access_key() {
-  aws iam create-access-key \
+  new_key=$(aws iam create-access-key \
     --query '[AccessKey.AccessKeyId,AccessKey.SecretAccessKey]' \
-    --output text | awk '{ print "export AWS_ACCESS_KEY_ID=\"" $1 "\"\n" "export AWS_SECRET_ACCESS_KEY=\"" $2 "\"" }'
+	--output text)
+
+  # This sets it globally
+  key_id=$(echo "${new_key}" | cut -f1)
+  key_secret=$(echo "${new_key}" | cut -f2)
+  printf 'export AWS_ACCESS_KEY_ID="%s"\nexport AWS_SECRET_ACCESS_KEY="%s"\n' "${key_id}" "${key_secret}"
 }
 
-send_keys_to_evil_hackers() {
-  for key in "$@"; do
-    aws iam delete-access-key \
-      --access-key-id "${key}"
+delete_keys_that_are_not() {
+  access_keys="$(get_access_keys "${1}")"
+  for key in $access_keys; do
+	if [ "${key}" != "$2" ]; then
+	  aws iam delete-access-key \
+		--access-key-id "${key}"
+    fi
   done
 }
 
 set -eu -o pipefail
-
 username="$(get_user_name)"
-access_keys="$(get_access_keys "${username}")"
-create_new_access_key
-send_keys_to_evil_hackers ${access_keys}
 
+# Delete all keys that are not the key we're using right now
+# * If you're not using STS, this is a standard key
+# * If you're using STS, this will remove all keys as your current key is STS
+delete_keys_that_are_not "${username}" "${key_id}"
+
+create_new_access_key
+
+# Delete all keys that are not the new access key we just generated
+delete_keys_that_are_not "${username}" "${key_id}"
